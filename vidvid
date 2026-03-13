@@ -1,0 +1,308 @@
+1. Go to github.com → New Repository
+2. Name: "my-youtube-clone"
+3. Public ✅
+4. Create repository
+5. Copy HTTPS clone URL   # RUN THIS IN TERMINAL
+git clone YOUR_GITHUB_REPO_URL
+cd my-youtube-clone
+mkdir backend frontend
+cd backend
+npm init -y {
+  "name": "video-app-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongoose": "^7.5.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+} const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const authRoutes = require('./routes/auth');
+const videoRoutes = require('./routes/videos');
+
+dotenv.config();
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+}).then(() => console.log('✅ MongoDB Connected'))
+  .catch(err => console.log('❌ MongoDB Error:', err));
+
+app.use('/api/auth', authRoutes);
+app.use('/api/videos', videoRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server: http://localhost:${PORT}`)); const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true }
+}, { timestamps: true });
+
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+userSchema.methods.comparePassword = async function(password) {
+  return await bcrypt.compare(password, this.password);
+};
+
+module.exports = mongoose.model('User', userSchema); const mongoose = require('mongoose');
+
+const videoSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: String,
+  videoUrl: String,
+  thumbnail: String,
+  views: { type: Number, default: 0 },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Video', videoSchema); const express = require('express');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const router = express.Router();
+
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    const user = new User({ username, email, password });
+    await user.save();
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user._id, username } });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || !(await user.comparePassword(password))) {
+      return res.status(400).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user._id, username: user.username } });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+module.exports = router; const express = require('express');
+const Video = require('../models/Video');
+const router = express.Router();
+
+router.get('/', async (req, res) => {
+  const videos = await Video.find().populate('user', 'username').sort({ createdAt: -1 });
+  res.json(videos);
+});
+
+router.post('/', async (req, res) => {
+  const { title, description, videoUrl } = req.body;
+  const video = new Video({ title, description, videoUrl });
+  await video.save();
+  res.status(201).json(video);
+});
+
+module.exports = router; MONGODB_URI=mongodb+srv://YOUR_MONGODB_ATLAS_CONNECTION
+JWT_SECRET=mySuperSecretKey123
+PORT=5000 cd frontend && npm i react-router-dom axios @mui/material @emotion/react @emotion/styled @mui/icons-material react-player import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
+import { AppBar, Toolbar, Typography, Button, Container, Box, Card, CardMedia, CardContent, Grid, TextField } from '@mui/material';
+import VideoFeed from './components/VideoFeed';
+import VideoUpload from './components/VideoUpload';
+import Login from './components/Login';
+import Register from './components/Register';
+
+function App() {
+  const [user, setUser] = useState(null);
+  const [videos, setVideos] = useState([]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      setUser(JSON.parse(localStorage.getItem('user')));
+      fetchVideos();
+    }
+  }, []);
+
+  const fetchVideos = async () => {
+    try {
+      const res = await axios.get('http://localhost:5000/api/videos');
+      setVideos(res.data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const logout = () => {
+    localStorage.clear();
+    delete axios.defaults.headers.common['Authorization'];
+    setUser(null);
+  };
+
+  return (
+    <BrowserRouter>
+      <AppBar position="static">
+        <Toolbar>
+          <Typography variant="h6" sx={{ flexGrow: 1 }}>
+            <Link to="/" style={{ color: 'white', textDecoration: 'none' }}>VideoTube</Link>
+          </Typography>
+          {user ? (
+            <>
+              <Link to="/upload"><Button color="inherit">Upload</Button></Link>
+              <Button color="inherit" onClick={logout}>Logout</Button>
+            </>
+          ) : (
+            <>
+              <Link to="/login"><Button color="inherit">Login</Button></Link>
+              <Link to="/register"><Button color="inherit">Register</Button></Link>
+            </>
+          )}
+        </Toolbar>
+      </AppBar>
+      <Container sx={{ mt: 4 }}>
+        <Routes>
+          <Route path="/" element={<VideoFeed videos={videos} />} />
+          <Route path="/upload" element={<VideoUpload user={user} />} />
+          <Route path="/login" element={<Login setUser={setUser} />} />
+          <Route path="/register" element={<Register setUser={setUser} />} />
+        </Routes>
+      </Container>
+    </BrowserRouter>
+  );
+}
+
+export default App; import React from 'react';
+import { Link } from 'react-router-dom';
+import { Card, CardMedia, CardContent, Typography, Grid } from '@mui/material';
+
+const VideoFeed = ({ videos }) => {
+  return (
+    <Grid container spacing={3}>
+      {videos.map((video) => (
+        <Grid item xs={12} sm={6} md={4} key={video._id}>
+          <Card>
+            <CardMedia
+              component="img"
+              height="200"
+              image="https://via.placeholder.com/320x180?text=Video+Thumbnail"
+              alt={video.title}
+            />
+            <CardContent>
+              <Typography variant="h6">{video.title}</Typography>
+              <Typography variant="body2">{video.user?.username}</Typography>
+              <Typography variant="body2">{video.views} views</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      ))}
+    </Grid>
+  );
+};
+
+export default VideoFeed; import React, { useState } from 'react';
+import axios from 'axios';
+import { TextField, Button, Box, Alert } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+
+const Login = ({ setUser }) => {
+  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [error, setError] = useState('');
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.post('http://localhost:5000/api/auth/login', formData);
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+      setUser(res.data.user);
+      navigate('/');
+    } catch (err) {
+      setError(err.response?.data?.error || 'Login failed');
+    }
+  };
+
+  return (
+    <Box sx={{ maxWidth: 400, mx: 'auto', mt: 8 }}>
+      <form onSubmit={handleSubmit}>
+        {error && <Alert severity="error">{error}</Alert>}
+        <TextField fullWidth label="Email" type="email" value={formData.email}
+          onChange={(e) => setFormData({...formData, email: e.target.value})} required />
+        <Box sx={{ my: 2 }} />
+        <TextField fullWidth label="Password" type="password" value={formData.password}
+          onChange={(e) => setFormData({...formData, password: e.target.value})} required />
+        <Button type="submit" fullWidth variant="contained" sx={{ mt: 2 }}>Login</Button>
+      </form>
+    </Box>
+  );
+};
+
+export default Login; import React, { useState } from 'react';
+import axios from 'axios';
+import { TextField, Button, Box } from '@mui/material';
+
+const VideoUpload = ({ user }) => {
+  const [formData, setFormData] = useState({ title: '', description: '', videoUrl: '' });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post('http://localhost:5000/api/videos', formData);
+      alert('Video uploaded!');
+      setFormData({ title: '', description: '', videoUrl: '' });
+    } catch (error) {
+      alert('Upload failed');
+    }
+  };
+
+  if (!user) return <div>Please login to upload</div>;
+
+  return (
+    <Box sx={{ maxWidth: 600, mx: 'auto', mt: 4 }}>
+      <form onSubmit={handleSubmit}>
+        <TextField fullWidth label="Title" value={formData.title}
+          onChange={(e) => setFormData({...formData, title: e.target.value})} required />
+        <Box sx={{ my: 2 }} />
+        <TextField fullWidth label="Description" multiline rows={3} value={formData.description}
+          onChange={(e) => setFormData({...formData, description: e.target.value})} />
+        <Box sx={{ my: 2 }} />
+        <TextField fullWidth label="Video URL (YouTube/Vimeo)" value={formData.videoUrl}
+          onChange={(e) => setFormData({...formData, videoUrl: e.target.value})} required />
+        <Button type="submit" fullWidth variant="contained" sx={{ mt: 2 }}>Upload Video</Button>
+      </form>
+    </Box>
+  );
+};
+
+export default VideoUpload; # From project root
+git add .
+git commit -m "🚀 Complete YouTube Clone"
+git push origin main
